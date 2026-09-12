@@ -1,0 +1,39 @@
+# ============================================================================
+# TEMPLATE de metadata.yaml — a copier dans le dossier de chaque technique
+# avant l'ouverture d'une Pull Request (voir CONTRIBUTING.md).
+# ============================================================================
+
+# Identifiant unique du scenario, aligne sur la convention de nommage du depot
+# Format: <acteur>-<contexte>-<annee>-<phase>
+# Exemple: apt29-energy-2026-initial-access
+scenario_id:
+
+# Acteur de la menace emule, issu de la selection (Tache 10)
+apt_actor:
+
+# Reference ATT&CK exacte de la technique codifiee et sa tactique
+# Exemple: T1566.001 / Initial Access
+attack_technique:
+tactic:
+
+# Conditions techniques requises avant execution (issues de la modelisation, Tache 11)
+prerequisites:
+  -
+
+# Niveau de risque pour l'environnement de lab (Tache 11)
+# Valeurs autorisees: low / medium / high
+risk_level:
+
+# OS, segment reseau et contraintes d'execution du lab vise
+target_environment:
+  os:
+  network_segment:
+
+# Frameworks ou outils necessaires a l'execution du playbook
+tools_required:
+  -
+
+# Tracabilite de la contribution
+author:
+version: 1.0.0
+last_reviewed:

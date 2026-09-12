@@ -1,0 +1,12 @@
+# Fichiers de test locaux non destines au versioning
+*.log
+.DS_Store
+
+# Payloads volumineux ou sensibles a ne jamais committer par erreur
+shared/payloads/*.exe
+shared/payloads/*.bin
+
+# Environnements locaux
+.env
+venv/
+__pycache__/

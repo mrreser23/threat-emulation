@@ -1,0 +1,39 @@
+# ============================================================================
+# TEMPLATE de playbook.yaml — format Atomic Red Team
+# Copier ce fichier dans le dossier de la technique, puis l'adapter.
+# Pour une orchestration multi-techniques, voir plutot un adversary profile
+# Caldera (hors scope de ce template unitaire).
+# ============================================================================
+
+attack_technique:            # ex: T1566.001
+display_name:                # ex: Spearphishing Attachment - macro Office malveillante
+
+atomic_tests:
+  - name:                    # description courte de l'action emulee
+    description: >
+      # Decrire precisement ce que simule ce test, et pourquoi cette
+      # procedure est fidele au comportement documente de l'acteur
+      # (reference a la Tache 11 / procedure ATT&CK).
+
+    supported_platforms:
+      - windows                # ou: linux / macos
+
+    input_arguments:
+      # Parametrer ici les valeurs modifiables du test (chemins, payloads...)
+      exemple_argument:
+        description:
+        type: path
+        default:
+
+    executor:
+      name: manual              # ou: powershell / bash / command_prompt
+      steps: >
+        # 1. Decrire l'etape 1
+        # 2. Decrire l'etape 2
+        # 3. ...
+
+      cleanup_executor:
+        name:
+        cleanup_command: >
+          # Commande de nettoyage — OBLIGATOIRE, doit remettre le lab
+          # dans un etat propre apres execution (cf. exigence de la Tache 13).
