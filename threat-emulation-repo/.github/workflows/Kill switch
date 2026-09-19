@@ -1,0 +1,47 @@
+name: Arrêt d'urgence (Kill Switch)
+
+# Workflow séparé, volontairement minimal, réservé au responsable lab.
+# Interrompt Caldera et tous les agents actifs, quel que soit le scénario en cours.
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Tapez EXACTEMENT 'ARRETER' pour confirmer l'arrêt d'urgence"
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  kill-switch:
+    name: Interruption immédiate
+    runs-on: ubuntu-latest
+    environment:
+      name: lab-kill-switch # environment avec required reviewers = responsable(s) lab uniquement
+    steps:
+      - name: Vérifier la confirmation explicite
+        run: |
+          if [ "${{ inputs.confirmation }}" != "ARRETER" ]; then
+            echo "::error::Confirmation invalide — arrêt d'urgence annulé"
+            exit 1
+          fi
+
+      - name: Authentification AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Stopper Caldera et tous les agents
+        run: |
+          aws ssm send-command \
+            --instance-ids "${{ vars.CALDERA_HOST_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["/opt/lab/kill_switch.sh"]'
+
+      - name: Journaliser l'arrêt d'urgence
+        run: |
+          echo "$(date -u +%FT%TZ) | KILL SWITCH déclenché par ${{ github.actor }} \
+          | run_id=${{ github.run_id }}" >> audit.log
