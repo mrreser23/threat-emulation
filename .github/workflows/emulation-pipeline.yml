@@ -209,6 +209,7 @@ jobs:
   # 3. Exécution — déclenchement via SSM Run Command (Caldera est en IP privée)
   # ---------------------------------------------------------------------
   execute:
+    
     name: Déclenchement Caldera via SSM
     needs: [validate, approval]
     if: always() && needs.validate.result == 'success' && (needs.approval.result == 'success' || needs.approval.result == 'skipped')
@@ -217,6 +218,14 @@ jobs:
     environment:
       name: lab-execution # second environment, sans reviewer, juste pour scoper les secrets OIDC
     steps:
+      - name: Debug OIDC token
+        run: |
+          curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" \
+            | jq -r '.value' \
+            | cut -d'.' -f2 \
+            | base64 -d 2>/dev/null \
+            | jq '{sub, aud, repository, environment}'
       - name: Authentification AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
