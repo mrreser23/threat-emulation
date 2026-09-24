@@ -1,0 +1,14 @@
+scenario_id: smoke-test-2026
+apt_actor: smoke
+attack_technique: T1082
+tactic: discovery
+risk_level: low
+target_environment:
+  os: windows
+  network_segment: lab-targets
+target_group: red
+adversary_id: 9c0f9ed2-237b-401d-b736-23d85d641a22
+tools_required:
+  - caldera
+author: marouan
+version: 1.0.0
