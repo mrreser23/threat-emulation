@@ -1,0 +1,19 @@
+scenario_id: apt29-energy-2026-persistence
+apt_actor: APT29
+attack_technique: T1053.005
+tactic: Persistence
+prerequisites:
+  - Privileges suffisants pour creer une tache planifiee
+  - Agent sandcat Elevated
+risk_level: medium
+target_environment:
+  os: windows
+  network_segment: lab-targets
+target_group: red
+adversary_id: 7f8e9d0c-1a2b-43c4-9d5e-6f7a8b9c0d1e
+tools_required:
+  - Caldera (adversary profile)
+  - schtasks.exe
+author: Marouan_Sekera
+version: 1.0.0
+last_reviewed: 2026-09-28

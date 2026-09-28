@@ -1,0 +1,20 @@
+scenario_id: apt29-energy-2026-lateral-movement
+apt_actor: APT29
+attack_technique: T1021.001
+tactic: Lateral Movement
+prerequisites:
+  - Identifiants valides obtenus via T1003.001 ou test
+  - RDP active sur le DC cible
+  - Route reseau DC-Workstation ouverte
+risk_level: medium
+target_environment:
+  os: windows
+  network_segment: lab-targets
+target_group: red
+adversary_id: 7f8e9d0c-1a2b-43c4-9d5e-6f7a8b9c0d1e
+tools_required:
+  - Caldera (adversary profile)
+  - mstsc.exe / cmdkey
+author: Marouan_Sekera
+version: 1.0.0
+last_reviewed: 2026-09-28

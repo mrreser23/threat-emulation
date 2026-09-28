@@ -1,0 +1,36 @@
+attack_technique: T1041
+display_name: Exfiltration Over C2 Channel - Exfiltration via canal sandcat (APT29)
+
+atomic_tests:
+  - name: Exfiltration d'un fichier de test via le canal C2 existant
+    description: >
+      Exfiltre un fichier de test (non sensible) depuis le DC vers le
+      serveur Caldera en reutilisant le canal C2 HTTP deja etabli par
+      sandcat, au lieu d'une exfiltration vers un cloud public (T1567.002,
+      exclue par l'isolation reseau de la Tache 17). Reste entierement
+      interne au segment lab-targets. Absence assumee de regle Wazuh dediee :
+      angle mort documente, la detection porterait plutot sur l'analyse du
+      trafic C2 lui-meme (hors perimetre Sysmon/Windows-events de ce PoC).
+
+    supported_platforms:
+      - windows
+
+    input_arguments:
+      report_path:
+        description: Chemin du fichier de test genere puis exfiltre
+        type: path
+        default: C:\Windows\Temp\poc_report.txt
+
+    executor:
+      name: powershell
+      steps: >
+        1. "Rapport de test APT29-energy-2026 - exfiltration PoC" |
+           Out-File #{report_path}
+        2. Le contenu est transmis via le canal C2 sandcat deja actif
+           (aucune commande reseau additionnelle : reutilisation du canal
+           existant, conforme a T1041).
+
+      cleanup_executor:
+        name: powershell
+        cleanup_command: >
+          Remove-Item #{report_path} -Force -ErrorAction SilentlyContinue

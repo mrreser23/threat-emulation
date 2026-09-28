@@ -1,0 +1,20 @@
+scenario_id: apt29-energy-2026-exfiltration
+apt_actor: APT29
+attack_technique: T1041
+tactic: Exfiltration
+prerequisites:
+  - Acces au DC via T1021.001
+  - Canal C2 sandcat etabli
+  - Fichier de test non sensible sur le DC
+risk_level: low
+target_environment:
+  os: windows
+  network_segment: lab-targets
+target_group: red
+adversary_id: 7f8e9d0c-1a2b-43c4-9d5e-6f7a8b9c0d1e
+tools_required:
+  - Caldera (adversary profile)
+  - canal C2 HTTP sandcat
+author: Marouan_Sekera
+version: 1.0.0
+last_reviewed: 2026-09-28

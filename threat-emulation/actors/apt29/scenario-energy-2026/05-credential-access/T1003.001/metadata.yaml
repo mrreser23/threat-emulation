@@ -1,0 +1,20 @@
+scenario_id: apt29-energy-2026-credential-access
+apt_actor: APT29
+attack_technique: T1003.001
+tactic: Credential Access
+prerequisites:
+  - Windows Defender desactive sur la cible
+  - Agent sandcat Elevated
+  - Utilisateur test avec session active sur la cible
+risk_level: high
+target_environment:
+  os: windows
+  network_segment: lab-targets
+target_group: red
+adversary_id: 7f8e9d0c-1a2b-43c4-9d5e-6f7a8b9c0d1e
+tools_required:
+  - Caldera (adversary profile)
+  - comsvcs.dll MiniDump
+author: Marouan_Sekera
+version: 1.0.0
+last_reviewed: 2026-09-28

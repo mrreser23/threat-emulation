@@ -1,0 +1,31 @@
+attack_technique: T1059.001
+display_name: Command and Scripting Interpreter - Execution PowerShell encodee (APT29)
+
+atomic_tests:
+  - name: Execution PowerShell encodee en base64
+    description: >
+      Execute une commande PowerShell encodee en base64 via l'executeur natif
+      de sandcat, conforme aux TTPs documentees APT29 (utilisation systematique
+      de -EncodedCommand pour l'obfuscation legere). Genere Sysmon Event ID 1
+      et ScriptBlock Logging Event ID 4104, cibles principales pour Wazuh.
+
+    supported_platforms:
+      - windows
+
+    input_arguments:
+      commande_base:
+        description: Commande PowerShell en clair avant encodage
+        type: string
+        default: 'Write-Host "APT29-emulation: execution PowerShell confirmee"; whoami; hostname'
+
+    executor:
+      name: powershell
+      steps: >
+        1. Encoder #{commande_base} en UTF-16LE puis Base64.
+        2. Executer powershell.exe -NoProfile -EncodedCommand <chaine encodee>.
+        3. Verifier la sortie whoami/hostname pour confirmer l'execution.
+
+      cleanup_executor:
+        name: powershell
+        cleanup_command: >
+          # Aucun etat persistant cree par ce test : rien a nettoyer.

@@ -1,0 +1,32 @@
+attack_technique: T1053.005
+display_name: Scheduled Task/Job - Persistance via tache planifiee (APT29)
+
+atomic_tests:
+  - name: Creation d'une tache planifiee declenchee a l'ouverture de session
+    description: >
+      Cree une tache planifiee declenchee a l'ouverture de session, technique
+      de persistance frequemment observee chez APT29. Genere Event ID 4698
+      (creation de tache planifiee, necessite l'activation de la sous-categorie
+      d'audit "Other Object Access Events") et Sysmon Event ID 1.
+
+    supported_platforms:
+      - windows
+
+    input_arguments:
+      task_name:
+        description: Nom de la tache planifiee creee
+        type: string
+        default: WindowsUpdateCheck
+
+    executor:
+      name: command_prompt
+      steps: >
+        1. schtasks /create /tn "#{task_name}" /tr "powershell.exe -NoProfile
+           -WindowStyle Hidden -Command Write-Host 'apt29-persistence-poc'"
+           /sc onlogon /ru SYSTEM /f
+        2. Verifier l'apparition de l'Event ID 4698 dans le journal Security.
+
+      cleanup_executor:
+        name: command_prompt
+        cleanup_command: >
+          schtasks /delete /tn "#{task_name}" /f

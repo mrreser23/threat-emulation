@@ -1,0 +1,36 @@
+attack_technique: T1055
+display_name: Process Injection - Injection dans un processus legitime (APT29)
+
+atomic_tests:
+  - name: Injection CreateRemoteThread dans notepad.exe
+    description: >
+      Injecte un shellcode de test (non malveillant) dans un processus
+      notepad.exe via CreateRemoteThread, technique documentee dans les
+      procedures APT29 (evasion / elevation de privileges). Execute
+      uniquement parce que Windows Defender est desactive (Tache 17) :
+      mesure la detection pure par Wazuh (Sysmon Event ID 8 -
+      CreateRemoteThread), pas la prevention. Risque eleve : a reevaluer si
+      l'ability se revele instable (repli envisage : T1548.002).
+
+    supported_platforms:
+      - windows
+
+    input_arguments:
+      target_process:
+        description: Processus legitime cible pour l'injection
+        type: string
+        default: notepad.exe
+
+    executor:
+      name: powershell
+      steps: >
+        1. Start-Process #{target_process} -WindowStyle Hidden
+        2. Start-Sleep -Seconds 2
+        3. Invoke-AtomicTest T1055 -TestNumbers 1
+        4. Verifier l'apparition du Sysmon Event ID 8 (CreateRemoteThread)
+           cote Wazuh (regle 100111).
+
+      cleanup_executor:
+        name: powershell
+        cleanup_command: >
+          Get-Process notepad -ErrorAction SilentlyContinue | Stop-Process -Force

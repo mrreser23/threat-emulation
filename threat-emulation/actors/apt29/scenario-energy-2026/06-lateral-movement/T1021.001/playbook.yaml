@@ -1,0 +1,40 @@
+attack_technique: T1021.001
+display_name: Remote Desktop Protocol - Deplacement lateral via RDP (APT29)
+
+atomic_tests:
+  - name: Connexion RDP sortante avec identifiants voles
+    description: >
+      Etablit une connexion RDP sortante depuis le poste initialement
+      compromis vers le controleur de domaine, en utilisant les identifiants
+      recuperes a l'etape T1003.001. Genere Event ID 4624 (type 10 -
+      RemoteInteractive, regle Wazuh 100113) et 4778 (regle 100114) sur le
+      DC cible.
+
+    supported_platforms:
+      - windows
+
+    input_arguments:
+      target_dc:
+        description: Adresse ou nom du controleur de domaine cible
+        type: string
+        default: ""
+      username:
+        description: Compte utilise pour la connexion RDP
+        type: string
+        default: ""
+      password:
+        description: Mot de passe associe au compte
+        type: string
+        default: ""
+
+    executor:
+      name: command_prompt
+      steps: >
+        1. cmdkey /generic:TERMSRV/#{target_dc} /user:#{username} /pass:#{password}
+        2. mstsc.exe /v:#{target_dc} /f
+        3. Verifier cote DC l'apparition des Event ID 4624 (type 10) et 4778.
+
+      cleanup_executor:
+        name: command_prompt
+        cleanup_command: >
+          cmdkey /delete:TERMSRV/#{target_dc}

