@@ -10,7 +10,7 @@ target_environment:
   os: windows
   network_segment: lab-targets
 target_group: red
-adversary_id: 7f8e9d0c-1a2b-43c4-9d5e-6f7a8b9c0d1e
+adversary_id: ffe6dcaa-c6d0-4826-b174-c2eef561b0e7
 tools_required:
   - Caldera (adversary profile)
   - Atomic Red Team T1055

